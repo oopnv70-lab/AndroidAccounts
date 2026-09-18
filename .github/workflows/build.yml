@@ -8,6 +8,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    timeout-minutes: 40
     env:
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
       ANDROID_HOME: /usr/local/lib/android/sdk
@@ -21,6 +22,11 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Setup Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+
       - name: Install Android SDK packages
         run: |
           SDKMANAGER="$(find $ANDROID_SDK_ROOT/cmdline-tools -name sdkmanager -type f | head -n1)"
@@ -32,19 +38,25 @@ jobs:
           echo "--- build-tools ---"
           ls "$ANDROID_SDK_ROOT/build-tools" || true
 
+      - name: Write local.properties
+        run: |
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
+          cat local.properties
+
       - name: Grant execute permission for gradlew
         run: chmod +x ./gradlew
 
       - name: Build debug APK
         run: ./gradlew assembleDebug --stacktrace --no-daemon
 
+      - name: Show outputs
+        if: always()
+        run: find app/build/outputs -type f 2>/dev/null || true
+
       - name: Upload APK artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: accounts-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: warn
-
-      - name: Show outputs
-        if: always()
-        run: find app/build/outputs -type f 2>/dev/null || true

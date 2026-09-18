@@ -9,6 +9,9 @@ if (keystorePropsFile.exists()) {
     keystoreProps.load(new FileInputStream(keystorePropsFile))
 }
 
+// [add] 判断是否真的配置了可用签名；没有则让 AGP 回退默认随机调试签名。
+def hasCustomSigning = keystorePropsFile.exists() && keystoreProps['storeFile']
+
 android {
     namespace 'com.rosan.accounts'
     compileSdk 33
@@ -48,14 +51,20 @@ android {
 
     buildTypes {
         debug {
-            signingConfig signingConfigs.debug
+            // [add] 有 keystore 时沿用原自定义签名；否则不挂，由 AGP 使用默认随机调试签名。
+            if (hasCustomSigning) {
+                signingConfig signingConfigs.debug
+            }
             minifyEnabled false
             zipAlignEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
 
         release {
-            signingConfig signingConfigs.release
+            // [add] 同上：keystore 缺失时不挂自定义签名，避免打包 NPE。
+            if (hasCustomSigning) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled true
             zipAlignEnabled true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
