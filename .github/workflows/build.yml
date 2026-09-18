@@ -8,7 +8,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    steps:
+    env:
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+      ANDROID_HOME: /usr/local/lib/android/sdk&    steps:
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -18,13 +20,16 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install SDK packages (platform 33 + build-tools)
+      - name: Install Android SDK packages
         run: |
-          yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          sdkmanager "platforms;android-33" "build-tools;33.0.2" "platform-tools"
+          SDKMANAGER="$(find $ANDROID_SDK_ROOT/cmdline-tools -name sdkmanager -type f | head -n1)"
+          echo "sdkmanager: $SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" "platforms;android-33" "build-tools;33.0.2" "platform-tools" || true
+          echo "--- platforms ---"
+          ls "$ANDROID_SDK_ROOT/platforms" || true
+          echo "--- build-tools ---"
+          ls "$ANDROID_SDK_ROOT/build-tools" || true
 
       - name: Grant execute permission for gradlew
         run: chmod +x ./gradlew
@@ -39,8 +44,6 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: warn
 
-      - name: Show outputs (debug info)
+      - name: Show outputs
         if: always()
-        run: |
-          echo "=== APK outputs ==="
-          find app/build/outputs -type f 2>/dev/null || true
+        run: find app/build/outputs -type f 2>/dev/null || true
