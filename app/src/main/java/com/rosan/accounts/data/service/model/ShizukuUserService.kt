@@ -9,6 +9,7 @@ import android.util.Log
 import com.rosan.accounts.data.common.utils.dumpText
 import com.rosan.accounts.data.common.utils.requireShizukuPermissionGranted
 import com.rosan.accounts.data.common.utils.shizukuBinder
+import com.rosan.accounts.data.common.utils.UserManagerCompat
 import com.rosan.accounts.data.service.entity.AccountAuthenticatorEntity
 import com.rosan.accounts.data.service.entity.AccountEntity
 import com.rosan.accounts.data.service.entity.UserEntity
@@ -28,9 +29,7 @@ class ShizukuUserService(private val context: Context) : UserService {
     override suspend fun removeUser(userId: Int): Boolean = userManager.removeUser(userId)
 
     override suspend fun getUsers(): List<UserEntity> = requireShizukuPermissionGranted(context) {
-        (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
-            userManager.getUsers(false, false, false)
-        else userManager.getUsers(false)).map {
+        UserManagerCompat.getUsersWithFallback(userManager).map {
             UserEntity(id = it.id, name = it.name)
         }
     }
