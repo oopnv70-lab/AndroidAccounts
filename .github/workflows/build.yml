@@ -10,7 +10,8 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
-      ANDROID_HOME: /usr/local/lib/android/sdk&    steps:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+    steps:
       - name: Checkout
         uses: actions/checkout@v4
 
