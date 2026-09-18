@@ -3,9 +3,14 @@ name: Build APK
 on:
   push:
     branches: [ main ]
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 jobs:
+  # ------------------------------------------------------------------
+  # debug 构建：始终运行，任何 push 都能出调试包（原有逻辑保留）
+  # ------------------------------------------------------------------
   build:
     runs-on: ubuntu-22.04
     timeout-minutes: 40
@@ -60,3 +65,116 @@ jobs:
           name: accounts-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: warn
+
+  # ------------------------------------------------------------------
+  # release 构建 + 发布：
+  #   - 打 tag(v*) 推送时自动运行，也可 workflow_dispatch 手动触发
+  #   - 从 GitHub Secrets 还原正式签名 keystore
+  #   - assembleRelease 出签名 APK
+  #   - 创建 / 更新 GitHub Release 并附上 APK
+  # ------------------------------------------------------------------
+  release:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write
+    env:
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+      ANDROID_HOME: /usr/local/lib/android/sdk
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+
+      - name: Install Android SDK packages
+        run: |
+          SDKMANAGER="$(find $ANDROID_SDK_ROOT/cmdline-tools -name sdkmanager -type f | head -n1)"
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" "platforms;android-33" "build-tools;33.0.2" "platform-tools" || true
+
+      - name: Write local.properties
+        run: echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
+
+      - name: Restore release keystore from secrets
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          set -e
+          if [ -z "$RELEASE_KEYSTORE_BASE64" ]; then
+            echo "::error::RELEASE_KEYSTORE_BASE64 secret 未配置，无法进行正式签名构建"
+            exit 1
+          fi
+          mkdir -p keystore
+          printf '%s' "$RELEASE_KEYSTORE_BASE64" | base64 -d > keystore/release.p12
+          ls -la keystore/release.p12
+          {
+            echo "storeFile=../keystore/release.p12"
+            echo "storePassword=$RELEASE_KEYSTORE_PASSWORD"
+            echo "keyAlias=$RELEASE_KEY_ALIAS"
+            echo "keyPassword=$RELEASE_KEY_PASSWORD"
+          } > keystore/r0s.properties
+          echo "--- r0s.properties (password masked) ---"
+          sed -e "s/Password=.*/Password=****/" keystore/r0s.properties
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x ./gradlew
+
+      - name: Build release APK
+        run: ./gradlew assembleRelease --stacktrace --no-daemon
+
+      - name: Show outputs
+        if: always()
+        run: find app/build/outputs -type f 2>/dev/null || true
+
+      - name: Verify APK signature
+        if: always()
+        run: |
+          APK=$(find app/build/outputs/apk/release -name '*.apk' | head -n1)
+          echo "APK: $APK"
+          if [ -n "$APK" ]; then
+            APKSIGNER="$(find $ANDROID_SDK_ROOT/build-tools -name apksigner -type f | sort | tail -n1)"
+            "$APKSIGNER" verify --verbose --print-certs "$APK" || true
+          fi
+
+      - name: Rename release APK
+        if: success()
+        run: |
+          APK=$(find app/build/outputs/apk/release -name '*.apk' | head -n1)
+          mkdir -p dist
+          cp "$APK" "dist/AndroidAccounts-${GITHUB_REF_NAME}.apk"
+          ls -la dist/
+
+      - name: Upload release APK artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: accounts-release-apk
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: warn
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: AndroidAccounts ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          files: dist/*.apk
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
