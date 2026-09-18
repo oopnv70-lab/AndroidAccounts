@@ -9,8 +9,13 @@ if (keystorePropsFile.exists()) {
     keystoreProps.load(new FileInputStream(keystorePropsFile))
 }
 
-// [add] 判断是否真的配置了可用签名；没有则让 AGP 回退默认随机调试签名。
-def hasCustomSigning = keystorePropsFile.exists() && keystoreProps['storeFile']
+// [add] 只有在 keystore 配置文件存在、且它指向的 keystore 文件真实存在时，
+//        才启用自定义签名；否则保留 AGP 内置的默认调试签名（自动使用/生成
+//        ~/.android/debug.keystore），从而保证无 keystore 的 CI 环境也能打包。
+def hasCustomSigning = false
+if (keystorePropsFile.exists() && keystoreProps['storeFile']) {
+    hasCustomSigning = file(keystoreProps['storeFile']).exists()
+}
 
 android {
     namespace 'com.rosan.accounts'
@@ -30,22 +35,27 @@ android {
     }
 
     signingConfigs {
-        debug {
-            keyAlias keystoreProps['keyAlias']
-            keyPassword keystoreProps['keyPassword']
-            storeFile keystoreProps['storeFile'] ? file(keystoreProps['storeFile']) : null
-            storePassword keystoreProps['storePassword']
-            v1SigningEnabled true
-            v2SigningEnabled true
-        }
+        // [add] 只有在 keystore/r0s.properties 存在时才真正创建自定义签名配置；
+        // 若不存在（例如 CI 环境），这里不会声明名为 debug 的配置，
+        // 从而保留 AGP 内置的默认调试签名（自动使用 ~/.android/debug.keystore）。
+        if (hasCustomSigning) {
+            debug {
+                keyAlias keystoreProps['keyAlias']
+                keyPassword keystoreProps['keyPassword']
+                storeFile file(keystoreProps['storeFile'])
+                storePassword keystoreProps['storePassword']
+                v1SigningEnabled true
+                v2SigningEnabled true
+            }
 
-        release {
-            keyAlias keystoreProps['keyAlias']
-            storePassword keystoreProps['storePassword']
-            keyPassword keystoreProps['keyPassword']
-            storeFile keystoreProps['storeFile'] ? file(new File(keystoreProps['storeFile'])) : null
-            v1SigningEnabled true
-            v2SigningEnabled true
+            release {
+                keyAlias keystoreProps['keyAlias']
+                storePassword keystoreProps['storePassword']
+                keyPassword keystoreProps['keyPassword']
+                storeFile file(new File(keystoreProps['storeFile']))
+                v1SigningEnabled true
+                v2SigningEnabled true
+            }
         }
     }
 
